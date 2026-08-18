@@ -1,8 +1,7 @@
-# dbt + DuckDB, running locally
+# dbt, running locally
 
-A complete **dbt** project that runs entirely on your laptop — no warehouse, no
-credentials, no containers. [DuckDB](https://duckdb.org) is the engine and the
-whole "warehouse" is a single file (`warehouse.duckdb`).
+A complete **dbt** project that runs on your laptop against **Postgres** — with
+the engine as a one-flag swap, because nothing in the models is engine-specific.
 
 ## Quick start
 
@@ -10,10 +9,55 @@ whole "warehouse" is a single file (`warehouse.duckdb`).
 ./run.sh
 ```
 
-That's it. The script creates the virtualenv on first run, installs dbt, then
-does `dbt seed` → `dbt run` → `dbt test`.
+The script finds or creates a local warehouse, then does `dbt seed` → `dbt run`
+→ `dbt test`. For Postgres it tries, in order:
 
-**Prerequisites:** Python 3.12 (dbt doesn't support 3.13+ yet).
+1. an existing Postgres on `localhost:5432` (creates the `dbt` role and
+   `dbt_local` database if they're missing — it won't touch anything else)
+2. `docker compose up` using the bundled `docker-compose.yml`
+3. otherwise it tells you what to install
+
+**Prerequisites:** Python 3.12 (dbt doesn't support 3.13+ yet), plus either a
+local Postgres or Docker.
+
+## Swapping the engine
+
+Targets live in `profiles.yml`. Postgres is the default; DuckDB ships as a
+zero-infrastructure fallback where the entire warehouse is a single file:
+
+```bash
+./run.sh --target duckdb     # no server, no Docker, nothing to install
+dbt run --target duckdb      # or per-command
+export DBT_TARGET=duckdb     # or for the whole shell
+```
+
+To add Snowflake, BigQuery, Redshift, or anything else, install the adapter and
+add an output block — the models, tests, and DAG carry over untouched:
+
+```bash
+.venv/bin/pip install dbt-snowflake
+```
+
+```yaml
+# profiles.yml, under outputs:
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      ...
+```
+
+Every Postgres setting is an env var with a local-friendly default, so pointing
+at a different server needs no file edits:
+
+| Variable            | Default     |
+|---------------------|-------------|
+| `DBT_TARGET`        | `postgres`  |
+| `DBT_PG_HOST`       | `localhost` |
+| `DBT_PG_PORT`       | `5432`      |
+| `DBT_PG_USER`       | `dbt`       |
+| `DBT_PG_PASSWORD`   | `dbt`       |
+| `DBT_PG_DATABASE`   | `dbt_local` |
+| `DBT_PG_SCHEMA`     | `analytics` |
 
 ## What it builds
 
@@ -33,13 +77,11 @@ and customers, and the allowed set of order statuses.
 ## Poke at the results
 
 ```bash
-.venv/bin/python -c "import duckdb; print(duckdb.connect('warehouse.duckdb').sql('select * from customer_orders'))"
-```
+# postgres
+PGPASSWORD=dbt psql -h localhost -U dbt -d dbt_local -c 'table analytics.customer_orders'
 
-Or open the file in the DuckDB CLI (`brew install duckdb`):
-
-```bash
-duckdb warehouse.duckdb
+# duckdb
+.venv/bin/python -c "import duckdb; print(duckdb.connect('warehouse.duckdb').sql('select * from analytics.customer_orders'))"
 ```
 
 ## Working on it
@@ -59,7 +101,8 @@ dbt docs generate && dbt docs serve
 | Path                  | What's in it                                       |
 |-----------------------|----------------------------------------------------|
 | `dbt_project.yml`     | Project config; staging → views, marts → tables    |
-| `profiles.yml`        | The DuckDB connection. Lives in-repo, no secrets   |
+| `profiles.yml`        | Connection targets, all env-var driven             |
+| `docker-compose.yml`  | Postgres 16, only if you don't have one already    |
 | `seeds/`              | CSVs loaded into the warehouse by `dbt seed`       |
 | `models/staging/`     | One cleaned-up model per raw source                |
 | `models/marts/`       | Business-facing models built from staging          |
@@ -67,9 +110,3 @@ dbt docs generate && dbt docs serve
 
 `warehouse.duckdb`, `target/`, `logs/`, and `.venv/` are gitignored — everything
 tracked is source, and any clone rebuilds the warehouse from scratch.
-
-## Swapping in a real warehouse
-
-The models are plain SQL. To point them at Snowflake/BigQuery/Postgres, install
-that adapter and replace the `outputs.dev` block in `profiles.yml` — the models,
-tests, and DAG carry over unchanged.

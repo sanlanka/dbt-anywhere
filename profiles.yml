@@ -1,8 +1,26 @@
-# Local-only profile. dbt picks this up automatically from the project dir.
+# Local-only profile — no secrets here, everything is overridable by env var.
+# dbt picks this file up from the project directory (run.sh sets DBT_PROFILES_DIR).
+#
+# Swap engines with --target:  dbt run --target duckdb
+# Or set DBT_TARGET=duckdb once and every command follows.
+
 local_dbt:
-  target: dev
+  target: "{{ env_var('DBT_TARGET', 'postgres') }}"
   outputs:
-    dev:
+
+    postgres:
+      type: postgres
+      host: "{{ env_var('DBT_PG_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_PG_PORT', '5432') | int }}"
+      user: "{{ env_var('DBT_PG_USER', 'dbt') }}"
+      password: "{{ env_var('DBT_PG_PASSWORD', 'dbt') }}"
+      dbname: "{{ env_var('DBT_PG_DATABASE', 'dbt_local') }}"
+      schema: "{{ env_var('DBT_PG_SCHEMA', 'analytics') }}"
+      threads: 4
+
+    # Zero-infrastructure fallback: the whole warehouse is one file.
+    duckdb:
       type: duckdb
       path: warehouse.duckdb
+      schema: analytics
       threads: 4
