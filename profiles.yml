@@ -1,0 +1,8 @@
+# Local-only profile. dbt picks this up automatically from the project dir.
+local_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: warehouse.duckdb
+      threads: 4

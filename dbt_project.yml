@@ -1,0 +1,18 @@
+name: local_dbt
+version: "1.0.0"
+profile: local_dbt
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  local_dbt:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table
