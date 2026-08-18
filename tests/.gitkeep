@@ -1,0 +1,2 @@
+# Custom data tests that do not fit the built-in ones go here.
+# https://docs.getdbt.com/docs/build/data-tests#singular-data-tests
