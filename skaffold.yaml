@@ -1,0 +1,48 @@
+apiVersion: skaffold/v4beta13
+kind: Config
+metadata:
+  name: dbt-postgres
+
+# Skaffold builds the dbt runner image (python + dbt-core/postgres/duckdb)
+# locally. On Docker Desktop / minikube the image is used straight from the
+# local daemon (no registry push needed).
+build:
+  local:
+    push: false
+  artifacts:
+    - image: dbt-runner
+      context: docker/dbt
+      docker:
+        dockerfile: Dockerfile
+
+# Deploy the custom Helm chart, injecting the freshly built image tag.
+manifests:
+  helm:
+    releases:
+      - name: dbt-postgres
+        chartPath: charts/dbt
+        namespace: data
+        createNamespace: true
+        valuesFiles:
+          - charts/dbt/values.yaml
+        setValueTemplates:
+          dbt.image: "{{.IMAGE_REPO_dbt_runner}}:{{.IMAGE_TAG_dbt_runner}}"
+          # Project dir to mount into the dbt pod. Set PROJECT_DIR (spinup.sh
+          # does); if empty the chart skips the mount.
+          hostMount.hostPath: "{{.PROJECT_DIR}}"
+deploy:
+  helm: {}
+
+# Port-forwarding is part of the Skaffold config — `skaffold run --port-forward`
+# (or `skaffold dev`) forwards these automatically. No manual kubectl needed.
+portForward:
+  - resourceType: service
+    resourceName: dbt-docs
+    namespace: data
+    port: 8080
+    localPort: 8080
+  - resourceType: service
+    resourceName: postgres
+    namespace: data
+    port: 5432
+    localPort: 15432

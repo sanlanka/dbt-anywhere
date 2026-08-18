@@ -1,0 +1,6 @@
+apiVersion: v2
+name: dbt-postgres
+description: dbt + Postgres on Kubernetes, with the dbt docs site served in-cluster
+type: application
+version: 0.1.0
+appVersion: "1.12.2"

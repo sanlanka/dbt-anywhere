@@ -1,0 +1,41 @@
+# Values for the dbt-postgres chart.
+
+postgres:
+  # Stock official Postgres image (Docker Hub) — no build.
+  image: postgres:16-alpine
+  service: postgres
+  database: dbt_local
+  user: dbt
+  password: dbt
+  schema: analytics
+  # Off by default: the warehouse is rebuilt from seeds on every deploy, so an
+  # emptyDir keeps the footprint small and teardown clean. Flip to true for a
+  # PersistentVolumeClaim that survives pod restarts.
+  persistence:
+    enabled: false
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+dbt:
+  # Built by Skaffold from docker/dbt/Dockerfile. Skaffold overrides this at
+  # deploy time; the default lets `helm template` work standalone.
+  image: dbt-runner:latest
+  # Run seed/run/test on startup before serving docs. Set false to get an idle
+  # pod you can `kubectl exec` into.
+  buildOnStart: true
+  docsPort: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# Mount the project (models/, seeds/, dbt_project.yml, ...) into the dbt pod so
+# edits on your Mac are picked up by the next `dbt run` — no image rebuild.
+# Docker Desktop / minikube share /Users. spinup.sh injects hostPath = repo dir.
+hostMount:
+  enabled: true
+  hostPath: ""              # repo dir; set by Skaffold/spinup.sh
+  mountPath: /dbt           # where the project lands inside the pod

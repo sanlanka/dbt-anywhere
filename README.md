@@ -6,37 +6,44 @@
 If this saved you a day of warehouse setup, a ⭐ helps others find it — and
 [coffee](https://buymeacoffee.com/slanka10) keeps it maintained.
 
-One dbt project that runs on **Postgres**, **DuckDB**, or any warehouse you
-point it at. Nothing in the models is engine-specific, so the engine is a
-one-flag swap — and the default setup needs no cloud account, no credentials,
-and no signup.
+One dbt project, deployed to **Kubernetes** with one command — Postgres and a
+dbt runner via **Skaffold** and a small custom **Helm** chart. The same models
+also run straight on your laptop, because nothing in them is engine-specific.
 
 ## Quick start
 
 ```bash
-./run.sh
+./spinup.sh
 ```
 
-The script finds or creates a local warehouse, then does `dbt seed` → `dbt run`
-→ `dbt test`. For Postgres it tries, in order:
+That's it. The script installs any missing tooling (kubectl, helm, skaffold),
+builds the dbt image, deploys everything, runs `seed` → `run` → `test` inside
+the cluster, and holds the port-forwards:
 
-1. an existing Postgres on `localhost:5432` (creates the `dbt` role and
-   `dbt_local` database if they're missing — it won't touch anything else)
-2. `docker compose up` using the bundled `docker-compose.yml`
-3. otherwise it tells you what to install
+- dbt docs (DAG + catalog) → **http://localhost:8080**
+- Postgres → **localhost:15432** (user `dbt` / password `dbt` / db `dbt_local`)
 
-**Prerequisites:** Python 3.12 (dbt doesn't support 3.13+ yet), plus either a
-local Postgres or Docker.
+Port 15432, not 5432, so a Postgres already running on your Mac keeps its port.
 
-## Tearing it down
+Press `Ctrl-C` to stop the port-forwards (the cluster keeps running). To remove
+everything: `./teardown.sh` (add `--namespace` to delete the `data` namespace).
+
+**Prerequisites:** Docker Desktop with Kubernetes enabled (or minikube). On
+macOS the script auto-installs the CLI tools via Homebrew.
+
+## Running it without Kubernetes
+
+The project is a plain dbt project, so it also runs directly on your machine —
+useful for a fast edit/run loop:
 
 ```bash
-./teardown.sh          # drop the built tables/views + target/, logs/, warehouse.duckdb
-./teardown.sh --all    # ...and the database, the venv, and the Docker volume
+./run.sh                  # Postgres: uses a local one, or starts docker compose
+./run.sh --target duckdb  # no server at all, warehouse is a single file
+./teardown.sh --local     # clean up what run.sh created
 ```
 
-The default is safe to run any time — `./run.sh` rebuilds everything from
-source. `--all` asks you to type the database name before dropping it.
+`run.sh` creates the role, database, and schema if they don't exist. It never
+touches databases it didn't create.
 
 ## Swapping the engine
 
@@ -95,7 +102,10 @@ and customers, and the allowed set of order statuses.
 ## Poke at the results
 
 ```bash
-# postgres
+# in-cluster Postgres, while spinup.sh is holding the port-forward
+PGPASSWORD=dbt psql -h 127.0.0.1 -p 15432 -U dbt -d dbt_local -c 'table analytics.customer_orders'
+
+# local Postgres (run.sh)
 PGPASSWORD=dbt psql -h localhost -U dbt -d dbt_local -c 'table analytics.customer_orders'
 
 # duckdb
@@ -103,6 +113,17 @@ PGPASSWORD=dbt psql -h localhost -U dbt -d dbt_local -c 'table analytics.custome
 ```
 
 ## Working on it
+
+The project directory is mounted into the dbt pod, so editing a model on your
+Mac needs a re-run, never an image rebuild:
+
+```bash
+kubectl exec -it -n data deploy/dbt-runner -- dbt run
+kubectl exec -it -n data deploy/dbt-runner -- dbt test
+kubectl logs -f -l app=dbt-runner -n data
+```
+
+Locally it's the usual dbt loop:
 
 ```bash
 export DBT_PROFILES_DIR="$PWD"
@@ -118,14 +139,18 @@ dbt docs generate && dbt docs serve
 
 | Path                  | What's in it                                       |
 |-----------------------|----------------------------------------------------|
+| `skaffold.yaml`       | Builds the dbt image, deploys the chart, forwards ports |
+| `charts/dbt/`         | The Helm chart (Postgres + dbt runner). Tune `charts/dbt/values.yaml` |
+| `docker/dbt/`         | The dbt runner image and its entrypoint            |
+| `spinup.sh`           | Install tooling, deploy to k8s, hold port-forwards |
+| `teardown.sh`         | Remove the deployment (`--local` for a non-k8s build) |
 | `dbt_project.yml`     | Project config; staging → views, marts → tables    |
 | `profiles.yml`        | Connection targets, all env-var driven             |
 | `docker-compose.yml`  | Postgres 16, only if you don't have one already    |
 | `seeds/`              | CSVs loaded into the warehouse by `dbt seed`       |
 | `models/staging/`     | One cleaned-up model per raw source                |
 | `models/marts/`       | Business-facing models built from staging          |
-| `run.sh`              | Bootstrap + full build                             |
-| `teardown.sh`         | Remove what `run.sh` created                       |
+| `run.sh`              | Bootstrap + full build, without Kubernetes         |
 
 `warehouse.duckdb`, `target/`, `logs/`, and `.venv/` are gitignored — everything
 tracked is source, and any clone rebuilds the warehouse from scratch.
