@@ -6,47 +6,61 @@
 If this saved you a day of warehouse setup, a ⭐ helps others find it — and
 [coffee](https://buymeacoffee.com/slanka10) keeps it maintained.
 
-A working **dbt** project that connects to **the warehouse you already have** —
-Snowflake, BigQuery, Redshift, Databricks, Postgres — or to a zero-setup local
-sandbox if you just want to see it run. One command builds it, tests it, and
-opens the docs UI.
+A working **dbt** project that runs on **Kubernetes** with one command — via
+**Skaffold** and a small custom **Helm** chart — and connects to **the warehouse
+you already have**: Snowflake, BigQuery, Redshift, Databricks, Postgres.
 
-It runs dbt. It never spins up a database for you.
+It deploys dbt, not a database. Your warehouse stays where it is, including on
+your own machine.
 
 ## Quick start
 
-No warehouse, no config, nothing to install but Python:
-
 ```bash
-./run.sh --duckdb
+cp .env.example .env    # point at your warehouse
+./spinup.sh
 ```
 
-That builds the project against a local file and opens the DAG at
-**http://localhost:8080**. Point it at something real when you're ready:
+The script installs any missing tooling (kubectl, helm, skaffold), turns your
+`.env` into a Kubernetes Secret, builds the dbt image, deploys it, checks the
+connection, runs `seed` → `run` → `test` against your warehouse, holds the
+port-forward, and opens the UI when it's ready:
 
-```bash
-cp .env.example .env    # edit: warehouse type, host, credentials
-./run.sh
+- dbt docs (DAG + catalog) → **http://localhost:8080** — opens automatically
+
+`Ctrl-C` stops the port-forward; the pod keeps running. `./teardown.sh` removes
+everything (`--namespace` deletes the `data` namespace too). Neither script ever
+touches your warehouse.
+
+**Prerequisites:** Docker Desktop with Kubernetes enabled (or minikube), and a
+warehouse you can reach. On macOS the CLI tools install themselves via Homebrew.
+
+Two things `spinup.sh` handles that otherwise bite you on a first run:
+
+- **A missing database.** dbt creates schemas but never databases, so it prompts
+  before creating one — Postgres and Redshift only, servers you own. `--yes`
+  skips the prompt. Cloud warehouses are left alone.
+- **A warehouse on this Mac.** Inside a pod, `localhost` is the pod. If `.env`
+  points at `localhost`, the Secret gets `host.docker.internal` instead
+  (`host.minikube.internal` on minikube) so the pod reaches your machine. Your
+  `.env` is not modified.
+
+### If your local server refuses the connection
+
+A Postgres bound to loopback only can't be reached from a pod no matter what
+hostname it's given. `spinup.sh` detects this and says so before deploying. To
+open it up, in `postgresql.conf`:
+
+```
+listen_addresses = '*'
 ```
 
-`run.sh` creates the virtualenv on first use, checks the connection, runs
-`seed` → `run` → `test`, generates the docs, and serves them. `Ctrl-C` stops it;
-`./run.sh --clean` removes the virtualenv and build output.
-
-**If the database doesn't exist yet**, `run.sh` offers to create it — but only
-for Postgres and Redshift, servers you own:
+and in `pg_hba.conf`, allow the Docker network:
 
 ```
-==> Database 'analytics' does not exist on localhost:5432. Create it? [y/N]
+host  all  all  192.168.65.0/24  scram-sha-256
 ```
 
-`--yes` skips the prompt (for scripts and CI). Snowflake, BigQuery, and
-Databricks are never touched: creating databases there is rarely yours to do.
-dbt itself always creates the *schema*, on every warehouse — just never the
-database.
-
-**Prerequisites:** Python 3.12 (dbt doesn't support 3.13+ yet —
-`brew install python@3.12`).
+then restart Postgres. (Postgres.app: Server Settings → Show config files.)
 
 ## What's in here
 
@@ -62,12 +76,12 @@ database.
 | `dbt_project.yml` | Project config: where things live, how each folder is materialized |
 | `profiles.yml`    | Connection targets, all env-var driven. No secrets, safe to commit |
 | `.env.example`    | Template for your warehouse credentials. Copy to `.env` (gitignored) |
-| `run.sh`          | Build + test + serve docs. The main entry point |
-| `.dbt-ensure-db.py` | Helper `run.sh` uses to detect (and offer to create) a missing database |
-| `k8s/`            | Optional: run the same project inside Kubernetes. See [k8s/README.md](k8s/README.md) |
+| `spinup.sh`       | The entry point: deploy, run, serve the docs UI |
+| `teardown.sh`     | Remove the deployment |
+| `k8s/`            | The chart, image, and Skaffold config. See [k8s/README.md](k8s/README.md) |
 
-Generated at runtime and gitignored: `.venv/` (Python environment), `target/`
-(compiled SQL and artifacts), `logs/`, `warehouse.duckdb` (the sandbox).
+Generated at runtime and gitignored: `target/` (compiled SQL and artifacts),
+`logs/`, and `.env`.
 
 ## What it builds
 
@@ -108,16 +122,19 @@ DBT_SNOWFLAKE_DATABASE=ANALYTICS
 DBT_SCHEMA=ANALYTICS
 ```
 
-`profiles.yml` ships with targets for **duckdb**, **postgres**, **redshift**,
-**snowflake**, **bigquery**, and **databricks**. `DBT_TARGET` picks one. Every
+`profiles.yml` ships with targets for **postgres**, **redshift**, **snowflake**,
+**bigquery**, **databricks**, and **duckdb**. `DBT_TARGET` picks one. Every
 value has a default, so you only set what differs for you.
 
-**Install the adapter for your warehouse** — the virtualenv starts with DuckDB
-and Postgres:
+**Install the adapter for your warehouse.** The image ships with Postgres and
+DuckDB only, to keep it small. Add yours in `k8s/skaffold.yaml`:
 
-```bash
-.venv/bin/pip install dbt-snowflake   # or dbt-bigquery, dbt-redshift, dbt-databricks
+```yaml
+        buildArgs:
+          DBT_ADAPTERS: "dbt-postgres dbt-duckdb dbt-snowflake"
 ```
+
+Then re-run `./spinup.sh` — Skaffold rebuilds the image.
 
 ### BigQuery
 
@@ -126,36 +143,35 @@ BigQuery also needs a service-account JSON file. Download it, then point at it:
 ```bash
 DBT_TARGET=bigquery
 DBT_BIGQUERY_PROJECT=my-gcp-project
-DBT_BIGQUERY_KEYFILE=/absolute/path/to/service-account.json
+DBT_BIGQUERY_KEYFILE=/secrets/bigquery.json
 ```
 
-For the Kubernetes path, mount it as a Secret — see [k8s/README.md](k8s/README.md).
+The JSON has to be a file inside the pod, so mount it as a Secret — see
+[k8s/README.md](k8s/README.md).
 
 ## Everyday dbt commands
 
-```bash
-source .venv/bin/activate
-export DBT_PROFILES_DIR="$PWD"
+The project is mounted into the pod, so editing a model on your Mac and
+re-running picks it up — no image rebuild:
 
-dbt build                        # seed + run + test, in dependency order
-dbt run --select customer_orders # one model
-dbt run --select stg_orders+     # a model and everything downstream of it
-dbt test --select customer_orders
-dbt compile                      # render the SQL without executing it
-dbt docs generate && dbt docs serve
+```bash
+kubectl exec -it -n data deploy/dbt-runner -- dbt run
+kubectl exec -it -n data deploy/dbt-runner -- dbt run --select customer_orders
+kubectl exec -it -n data deploy/dbt-runner -- dbt run --select stg_orders+
+kubectl exec -it -n data deploy/dbt-runner -- dbt test
+kubectl exec -it -n data deploy/dbt-runner -- dbt build   # seed + run + test
+
+kubectl logs -f -l app=dbt-runner -n data                 # watch the pod
 ```
 
-`--select` is the workhorse: it takes model names, `+` for upstream/downstream,
-`tag:`, `path:`, and more.
+`--select` is the workhorse: model names, `+` for upstream/downstream, plus
+`tag:` and `path:` selectors.
 
-## Running it on Kubernetes
-
-Optional, and kept out of the way in [`k8s/`](k8s/README.md). It deploys dbt —
-not a database — and connects to the same warehouse from `.env`:
+To refresh the docs site after an edit:
 
 ```bash
-k8s/spinup.sh
-k8s/teardown.sh
+kubectl exec -n data deploy/dbt-runner -- dbt docs generate
+kubectl rollout restart -n data deploy/dbt-runner
 ```
 
 ## Learning dbt

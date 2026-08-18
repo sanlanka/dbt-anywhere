@@ -1,31 +1,20 @@
-# Running this project on Kubernetes
+# The Kubernetes deployment
 
-Optional. The dbt project in the repo root runs fine on its own with `./run.sh`
-— this folder is for running it *inside a cluster* instead, which is how you'd
-schedule it next to the rest of your infrastructure.
+The pieces `./spinup.sh` uses. You don't need to touch anything here to run the
+project — this is for when you want to change how it's deployed.
 
 It deploys **dbt only**. There is no database here: the pod connects out to the
 warehouse configured in `.env` at the repo root.
 
 ```bash
-cp .env.example .env    # in the repo root
-k8s/spinup.sh
+./spinup.sh      # from the repo root
+./teardown.sh
 ```
-
-The script installs any missing tooling, turns `.env` into a Kubernetes Secret,
-builds the dbt image, deploys it, checks the connection, runs `seed` → `run` →
-`test`, holds the port-forward, and opens the docs UI at
-**http://localhost:8080**.
-
-Remove it with `k8s/teardown.sh` (add `--namespace` to delete the `data`
-namespace too). Neither script ever touches your warehouse.
 
 ## What's in here
 
 | Path                       | What it is |
 |----------------------------|------------|
-| `spinup.sh`                | The entry point: preflight checks, Secret, deploy, port-forward |
-| `teardown.sh`              | Deletes the release and the credentials Secret |
 | `skaffold.yaml`            | Ties it together — builds the image, deploys the chart, forwards :8080 |
 | `charts/dbt/`              | The Helm chart |
 | `charts/dbt/values.yaml`   | Every knob: image, adapters, resources, mounts. Start here |
@@ -40,9 +29,16 @@ namespace too). Neither script ever touches your warehouse.
 .env  ──kubectl create secret──►  Secret/dbt-warehouse
                                         │ envFrom
 repo root ──hostPath mount──►  Pod/dbt-runner ──► your warehouse
-                                        │
+                                        │                 (anywhere reachable,
+                                        │                  including this Mac)
                                   Service/dbt-docs :8080 ──► localhost:8080
 ```
+
+- **A warehouse on your Mac** is reached as `host.docker.internal`
+  (`host.minikube.internal` on minikube): inside a pod, `localhost` is the pod.
+  `spinup.sh` rewrites the host when it builds the Secret, leaving your `.env`
+  alone. The server must listen on more than loopback for this to work —
+  `spinup.sh` warns you when it doesn't.
 
 - **Credentials** go in as a Secret built from `.env`, pulled into the container
   with `envFrom`. They never enter the chart, `helm get values`, or git. Re-run
@@ -63,6 +59,25 @@ The image ships with Postgres and DuckDB only, to keep it small. Add yours in
         buildArgs:
           DBT_ADAPTERS: "dbt-postgres dbt-duckdb dbt-snowflake"
 ```
+
+Then re-run `./spinup.sh`; Skaffold rebuilds the image.
+
+## BigQuery
+
+BigQuery needs the service-account JSON as a file in the pod:
+
+```bash
+kubectl create secret generic dbt-bigquery-key -n data \
+  --from-file=bigquery.json=/path/to/service-account.json
+```
+
+```yaml
+# charts/dbt/values.yaml
+warehouse:
+  keyfileSecret: dbt-bigquery-key
+```
+
+Then set `DBT_BIGQUERY_KEYFILE=/secrets/bigquery.json` in `.env`.
 
 ## Common tasks
 

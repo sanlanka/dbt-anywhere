@@ -2,16 +2,14 @@
 #
 # Remove everything spinup.sh deployed (via Skaffold).
 #
-#   k8s/teardown.sh              # delete the dbt release
-#   k8s/teardown.sh --namespace  # ...and delete the 'data' namespace too
-#
-# For a local (non-Kubernetes) build, use ./run.sh --clean in the repo root.
+#   ./teardown.sh              # delete the dbt release
+#   ./teardown.sh --namespace  # ...and delete the 'data' namespace too
 #
 # Note: this never touches your warehouse. To remove what dbt built there, drop
 # the schema it writes into (DBT_SCHEMA in .env, 'analytics' by default).
 #
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")"
+cd "$(dirname "${BASH_SOURCE[0]}")/k8s"   # skaffold.yaml lives here
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 
