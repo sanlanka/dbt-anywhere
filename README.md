@@ -9,6 +9,9 @@ Databricks, Postgres, or a Postgres on your own laptop.
 
 It deploys dbt, not a database.
 
+**New to dbt?** [EXAMPLE.md](EXAMPLE.md) walks through what dbt is, what this
+project builds, and how to verify every piece of it in Postgres.
+
 If this saved you a day of setup, a ⭐ helps others find it — and
 [coffee](https://buymeacoffee.com/slanka10) keeps it maintained.
 
@@ -72,7 +75,8 @@ seeds/*.csv ──► models/staging/ (views) ──► models/marts/customer_or
 
 Raw → staging → marts is the standard dbt layout; keep it as you add your own.
 10 data tests cover uniqueness, not-null, referential integrity, and accepted
-values.
+values. [EXAMPLE.md](EXAMPLE.md) walks through all of it against a real Postgres,
+including making a test fail on purpose.
 
 | Path              | What it is |
 |-------------------|------------|
