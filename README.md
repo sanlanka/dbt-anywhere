@@ -1,5 +1,11 @@
 # dbt anywhere
 
+[![Star this repo](https://img.shields.io/github/stars/sanlanka/dbt-anywhere?style=flat&logo=github&label=Star%20this%20repo&color=yellow)](https://github.com/sanlanka/dbt-anywhere)
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/slanka10)
+
+If this saved you a day of warehouse setup, a ⭐ helps others find it — and
+[coffee](https://buymeacoffee.com/slanka10) keeps it maintained.
+
 One dbt project that runs on **Postgres**, **DuckDB**, or any warehouse you
 point it at. Nothing in the models is engine-specific, so the engine is a
 one-flag swap — and the default setup needs no cloud account, no credentials,
