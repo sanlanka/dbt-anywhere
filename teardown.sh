@@ -4,7 +4,7 @@
 #
 #   ./teardown.sh              # delete the dbt + Postgres release
 #   ./teardown.sh --namespace  # ...and delete the 'data' namespace too
-#   ./teardown.sh --local      # instead: clean up a local (non-k8s) run.sh build
+#   ./teardown.sh --local      # instead: clean up a ./spinup.sh --local build
 #
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -27,6 +27,11 @@ if [[ "${1:-}" == "--local" ]]; then
       -d "$PG_DATABASE" -q -c "drop schema if exists $PG_SCHEMA cascade;"
   else
     info "No reachable Postgres at $PG_HOST:$PG_PORT/$PG_DATABASE — skipping."
+  fi
+
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    info "Stopping the docker compose Postgres, if spinup.sh started one..."
+    docker compose down 2>/dev/null || true
   fi
 
   info "Removing local build artifacts (target/, logs/, warehouse.duckdb, .venv/)..."

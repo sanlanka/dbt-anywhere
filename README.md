@@ -16,14 +16,16 @@ also run straight on your laptop, because nothing in them is engine-specific.
 ./spinup.sh
 ```
 
-That's it. The script installs any missing tooling (kubectl, helm, skaffold),
-builds the dbt image, deploys everything, runs `seed` → `run` → `test` inside
-the cluster, and holds the port-forwards:
+That's it — one command brings up everything. The script installs any missing
+tooling (kubectl, helm, skaffold), builds the dbt image, deploys Postgres and
+the dbt runner, runs `seed` → `run` → `test` inside the cluster, holds the
+port-forwards, and opens the UI in your browser when it's ready:
 
-- dbt docs (DAG + catalog) → **http://localhost:8080**
+- dbt docs (DAG + catalog) → **http://localhost:8080** — opens automatically
 - Postgres → **localhost:15432** (user `dbt` / password `dbt` / db `dbt_local`)
 
 Port 15432, not 5432, so a Postgres already running on your Mac keeps its port.
+Pass `--no-browser` if you'd rather it didn't open a tab.
 
 Press `Ctrl-C` to stop the port-forwards (the cluster keeps running). To remove
 everything: `./teardown.sh` (add `--namespace` to delete the `data` namespace).
@@ -33,17 +35,16 @@ macOS the script auto-installs the CLI tools via Homebrew.
 
 ## Running it without Kubernetes
 
-The project is a plain dbt project, so it also runs directly on your machine —
-useful for a fast edit/run loop:
+Same script, same ending — built, tested, docs UI open — with no cluster:
 
 ```bash
-./run.sh                  # Postgres: uses a local one, or starts docker compose
-./run.sh --target duckdb  # no server at all, warehouse is a single file
-./teardown.sh --local     # clean up what run.sh created
+./spinup.sh --local       # Postgres: an existing one, or docker compose
+./spinup.sh --local --duckdb   # no database server at all, warehouse is a file
+./teardown.sh --local     # clean up what --local created
 ```
 
-`run.sh` creates the role, database, and schema if they don't exist. It never
-touches databases it didn't create.
+In `--local` mode the script creates the virtualenv, role, database, and schema
+if they don't exist. It never touches databases it didn't create.
 
 ## Swapping the engine
 
@@ -142,15 +143,14 @@ dbt docs generate && dbt docs serve
 | `skaffold.yaml`       | Builds the dbt image, deploys the chart, forwards ports |
 | `charts/dbt/`         | The Helm chart (Postgres + dbt runner). Tune `charts/dbt/values.yaml` |
 | `docker/dbt/`         | The dbt runner image and its entrypoint            |
-| `spinup.sh`           | Install tooling, deploy to k8s, hold port-forwards |
-| `teardown.sh`         | Remove the deployment (`--local` for a non-k8s build) |
+| `spinup.sh`           | The one entry point: brings everything up, k8s or `--local` |
+| `teardown.sh`         | Remove it all (`--local` for a non-k8s build)      |
 | `dbt_project.yml`     | Project config; staging → views, marts → tables    |
 | `profiles.yml`        | Connection targets, all env-var driven             |
 | `docker-compose.yml`  | Postgres 16, only if you don't have one already    |
 | `seeds/`              | CSVs loaded into the warehouse by `dbt seed`       |
 | `models/staging/`     | One cleaned-up model per raw source                |
 | `models/marts/`       | Business-facing models built from staging          |
-| `run.sh`              | Bootstrap + full build, without Kubernetes         |
 
 `warehouse.duckdb`, `target/`, `logs/`, and `.venv/` are gitignored — everything
 tracked is source, and any clone rebuilds the warehouse from scratch.
