@@ -1,26 +1,72 @@
-# Local-only profile — no secrets here, everything is overridable by env var.
-# dbt picks this file up from the project directory (run.sh sets DBT_PROFILES_DIR).
+# Connection targets.
 #
-# Swap engines with --target:  dbt run --target duckdb
-# Or set DBT_TARGET=duckdb once and every command follows.
+# No secrets live here — every value is read from the environment, so this file
+# is safe to commit and is identical everywhere: your laptop, CI, or the dbt pod
+# (which gets the same variables from a Kubernetes Secret).
+#
+# Defaults are set for every value, so the project parses and runs even with no
+# environment at all — it falls back to the DuckDB sandbox.
+#
+# Pick a target with DBT_TARGET in .env, or --target on any dbt command.
 
 dbt_anywhere:
-  target: "{{ env_var('DBT_TARGET', 'postgres') }}"
+  target: "{{ env_var('DBT_TARGET', 'duckdb') }}"
   outputs:
+
+    # Sandbox: no warehouse, no server. The whole thing is one local file.
+    duckdb:
+      type: duckdb
+      path: "{{ env_var('DBT_DUCKDB_PATH', 'warehouse.duckdb') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'analytics') }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"
 
     postgres:
       type: postgres
       host: "{{ env_var('DBT_PG_HOST', 'localhost') }}"
       port: "{{ env_var('DBT_PG_PORT', '5432') | int }}"
       user: "{{ env_var('DBT_PG_USER', 'dbt') }}"
-      password: "{{ env_var('DBT_PG_PASSWORD', 'dbt') }}"
-      dbname: "{{ env_var('DBT_PG_DATABASE', 'dbt_local') }}"
-      schema: "{{ env_var('DBT_PG_SCHEMA', 'analytics') }}"
-      threads: 4
+      password: "{{ env_var('DBT_PG_PASSWORD', '') }}"
+      dbname: "{{ env_var('DBT_PG_DATABASE', 'analytics') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'analytics') }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"
 
-    # Zero-infrastructure fallback: the whole warehouse is one file.
-    duckdb:
-      type: duckdb
-      path: warehouse.duckdb
-      schema: analytics
-      threads: 4
+    redshift:
+      type: redshift
+      host: "{{ env_var('DBT_REDSHIFT_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_REDSHIFT_PORT', '5439') | int }}"
+      user: "{{ env_var('DBT_REDSHIFT_USER', 'dbt') }}"
+      password: "{{ env_var('DBT_REDSHIFT_PASSWORD', '') }}"
+      dbname: "{{ env_var('DBT_REDSHIFT_DATABASE', 'analytics') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'analytics') }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"
+
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('DBT_SNOWFLAKE_ACCOUNT', '') }}"
+      user: "{{ env_var('DBT_SNOWFLAKE_USER', 'dbt') }}"
+      password: "{{ env_var('DBT_SNOWFLAKE_PASSWORD', '') }}"
+      role: "{{ env_var('DBT_SNOWFLAKE_ROLE', 'TRANSFORMER') }}"
+      warehouse: "{{ env_var('DBT_SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH') }}"
+      database: "{{ env_var('DBT_SNOWFLAKE_DATABASE', 'ANALYTICS') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'ANALYTICS') }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"
+
+    bigquery:
+      type: bigquery
+      method: service-account
+      project: "{{ env_var('DBT_BIGQUERY_PROJECT', '') }}"
+      dataset: "{{ env_var('DBT_SCHEMA', 'analytics') }}"
+      location: "{{ env_var('DBT_BIGQUERY_LOCATION', 'US') }}"
+      # Path to the service-account JSON. Locally a file on disk; in the pod a
+      # mounted Secret (see warehouse.keyfileSecret in k8s/charts/dbt/values.yaml).
+      keyfile: "{{ env_var('DBT_BIGQUERY_KEYFILE', '') }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"
+
+    databricks:
+      type: databricks
+      host: "{{ env_var('DBT_DATABRICKS_HOST', '') }}"
+      http_path: "{{ env_var('DBT_DATABRICKS_HTTP_PATH', '') }}"
+      token: "{{ env_var('DBT_DATABRICKS_TOKEN', '') }}"
+      catalog: "{{ env_var('DBT_DATABRICKS_CATALOG', 'main') }}"
+      schema: "{{ env_var('DBT_SCHEMA', 'analytics') }}"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"

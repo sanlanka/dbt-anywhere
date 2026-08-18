@@ -17,10 +17,14 @@ spec:
       containers:
         - name: dbt-runner
           image: {{ .Values.dbt.image | quote }}
+          # Every DBT_* connection var comes from the Secret spinup.sh builds
+          # from your .env, so credentials never appear in the chart or in
+          # `helm get values`.
+          envFrom:
+            - secretRef:
+                name: {{ .Values.warehouse.secretName | quote }}
+                optional: true
           env:
-{{ include "dbt.pgEnv" . | indent 12 }}
-            - name: DBT_TARGET
-              value: postgres
             - name: DBT_PROFILES_DIR
               value: {{ .Values.hostMount.mountPath | quote }}
             # Keep target/ and logs/ out of the mounted repo — the pod runs as
@@ -42,14 +46,16 @@ spec:
               port: {{ .Values.dbt.docsPort }}
             initialDelaySeconds: 15
             periodSeconds: 5
-            failureThreshold: 30
+            failureThreshold: 60
           workingDir: {{ .Values.hostMount.mountPath | quote }}
           volumeMounts:
 {{ include "dbt.projectMount" . | indent 12 }}
+{{ include "dbt.keyfileMount" . | indent 12 }}
           resources:
 {{ toYaml .Values.dbt.resources | indent 12 }}
       volumes:
 {{ include "dbt.projectVolume" . | indent 8 }}
+{{ include "dbt.keyfileVolume" . | indent 8 }}
 ---
 apiVersion: v1
 kind: Service

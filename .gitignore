@@ -8,3 +8,4 @@ logs/
 .idea/
 __pycache__/
 .user.yml
+.env

@@ -1,23 +1,18 @@
-# Values for the dbt-postgres chart.
+# Values for the dbt chart.
+#
+# This chart deploys dbt only. It does NOT run a warehouse — it connects to the
+# one you already have. Credentials come from a Kubernetes Secret that
+# spinup.sh builds from your .env file, so nothing sensitive lands in here.
 
-postgres:
-  # Stock official Postgres image (Docker Hub) — no build.
-  image: postgres:16-alpine
-  service: postgres
-  database: dbt_local
-  user: dbt
-  password: dbt
-  schema: analytics
-  # Off by default: the warehouse is rebuilt from seeds on every deploy, so an
-  # emptyDir keeps the footprint small and teardown clean. Flip to true for a
-  # PersistentVolumeClaim that survives pod restarts.
-  persistence:
-    enabled: false
-    size: 1Gi
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
+warehouse:
+  # Secret holding the DBT_* connection vars. spinup.sh creates it from .env.
+  secretName: dbt-warehouse
+  # BigQuery only: a Secret holding the service-account JSON, mounted at
+  # mountPath. Create it yourself, then set the name here:
+  #   kubectl create secret generic dbt-bigquery-key -n data \
+  #     --from-file=bigquery.json=/path/to/key.json
+  keyfileSecret: ""
+  keyfileMountPath: /secrets
 
 dbt:
   # Built by Skaffold from docker/dbt/Dockerfile. Skaffold overrides this at

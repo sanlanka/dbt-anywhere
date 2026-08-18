@@ -6,84 +6,55 @@
 If this saved you a day of warehouse setup, a ⭐ helps others find it — and
 [coffee](https://buymeacoffee.com/slanka10) keeps it maintained.
 
-One dbt project, deployed to **Kubernetes** with one command — Postgres and a
-dbt runner via **Skaffold** and a small custom **Helm** chart. The same models
-also run straight on your laptop, because nothing in them is engine-specific.
+A working **dbt** project that connects to **the warehouse you already have** —
+Snowflake, BigQuery, Redshift, Databricks, Postgres — or to a zero-setup local
+sandbox if you just want to see it run. One command builds it, tests it, and
+opens the docs UI.
+
+It runs dbt. It never spins up a database for you.
 
 ## Quick start
 
-```bash
-./spinup.sh
-```
-
-That's it — one command brings up everything. The script installs any missing
-tooling (kubectl, helm, skaffold), builds the dbt image, deploys Postgres and
-the dbt runner, runs `seed` → `run` → `test` inside the cluster, holds the
-port-forwards, and opens the UI in your browser when it's ready:
-
-- dbt docs (DAG + catalog) → **http://localhost:8080** — opens automatically
-- Postgres → **localhost:15432** (user `dbt` / password `dbt` / db `dbt_local`)
-
-Port 15432, not 5432, so a Postgres already running on your Mac keeps its port.
-Pass `--no-browser` if you'd rather it didn't open a tab.
-
-Press `Ctrl-C` to stop the port-forwards (the cluster keeps running). To remove
-everything: `./teardown.sh` (add `--namespace` to delete the `data` namespace).
-
-**Prerequisites:** Docker Desktop with Kubernetes enabled (or minikube). On
-macOS the script auto-installs the CLI tools via Homebrew.
-
-## Running it without Kubernetes
-
-Same script, same ending — built, tested, docs UI open — with no cluster:
+No warehouse, no config, nothing to install but Python:
 
 ```bash
-./spinup.sh --local       # Postgres: an existing one, or docker compose
-./spinup.sh --local --duckdb   # no database server at all, warehouse is a file
-./teardown.sh --local     # clean up what --local created
+./run.sh --duckdb
 ```
 
-In `--local` mode the script creates the virtualenv, role, database, and schema
-if they don't exist. It never touches databases it didn't create.
-
-## Swapping the engine
-
-Targets live in `profiles.yml`. Postgres is the default; DuckDB ships as a
-zero-infrastructure fallback where the entire warehouse is a single file:
+That builds the project against a local file and opens the DAG at
+**http://localhost:8080**. Point it at something real when you're ready:
 
 ```bash
-./spinup.sh --local --duckdb  # no server, no Docker, nothing to install
-dbt run --target duckdb      # or per-command
-export DBT_TARGET=duckdb     # or for the whole shell
+cp .env.example .env    # edit: warehouse type, host, credentials
+./run.sh
 ```
 
-To add Snowflake, BigQuery, Redshift, or anything else, install the adapter and
-add an output block — the models, tests, and DAG carry over untouched:
+`run.sh` creates the virtualenv on first use, checks the connection, runs
+`seed` → `run` → `test`, generates the docs, and serves them. `Ctrl-C` stops it;
+`./run.sh --clean` removes the virtualenv and build output.
 
-```bash
-.venv/bin/pip install dbt-snowflake
-```
+**Prerequisites:** Python 3.12 (dbt doesn't support 3.13+ yet —
+`brew install python@3.12`).
 
-```yaml
-# profiles.yml, under outputs:
-    snowflake:
-      type: snowflake
-      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
-      ...
-```
+## What's in here
 
-Every Postgres setting is an env var with a local-friendly default, so pointing
-at a different server needs no file edits:
+| Path              | What it is |
+|-------------------|------------|
+| `models/`         | The SQL. Each `.sql` file is one table or view dbt builds |
+| `models/staging/` | One lightly-cleaned model per raw source. Materialized as views |
+| `models/marts/`   | Business-facing models built from staging. Materialized as tables |
+| `models/**/*.yml` | Descriptions and data tests for the models beside them |
+| `seeds/`          | Small CSVs dbt loads into the warehouse — reference data, or demo data like here |
+| `macros/`         | Reusable SQL snippets (Jinja functions). Empty until you need one |
+| `tests/`          | Custom data tests that don't fit the built-in ones |
+| `dbt_project.yml` | Project config: where things live, how each folder is materialized |
+| `profiles.yml`    | Connection targets, all env-var driven. No secrets, safe to commit |
+| `.env.example`    | Template for your warehouse credentials. Copy to `.env` (gitignored) |
+| `run.sh`          | Build + test + serve docs. The main entry point |
+| `k8s/`            | Optional: run the same project inside Kubernetes. See [k8s/README.md](k8s/README.md) |
 
-| Variable            | Default     |
-|---------------------|-------------|
-| `DBT_TARGET`        | `postgres`  |
-| `DBT_PG_HOST`       | `localhost` |
-| `DBT_PG_PORT`       | `5432`      |
-| `DBT_PG_USER`       | `dbt`       |
-| `DBT_PG_PASSWORD`   | `dbt`       |
-| `DBT_PG_DATABASE`   | `dbt_local` |
-| `DBT_PG_SCHEMA`     | `analytics` |
+Generated at runtime and gitignored: `.venv/` (Python environment), `target/`
+(compiled SQL and artifacts), `logs/`, `warehouse.duckdb` (the sandbox).
 
 ## What it builds
 
@@ -92,65 +63,121 @@ seeds/raw_customers.csv  ─┐
 seeds/raw_orders.csv     ─┴─► staging (views) ──► marts/customer_orders (table)
 ```
 
-- **`stg_customers`, `stg_orders`** — light cleanup: casts, a `full_name`
+- **`stg_customers`, `stg_orders`** — light cleanup: type casts, a `full_name`
   column. Views, so they cost nothing to rebuild.
 - **`customer_orders`** — one row per customer with completed-order counts,
-  lifetime value, and first/most-recent order dates. Materialized as a table.
+  lifetime value, and first/most-recent order dates. A table, because it's what
+  gets queried.
+
+This shape — raw → staging → marts — is the convention dbt projects follow, and
+it's worth keeping as you add your own models.
 
 10 data tests cover uniqueness, not-null, referential integrity between orders
-and customers, and the allowed set of order statuses.
+and customers, and the allowed set of order statuses. `dbt test` runs them.
 
-## Poke at the results
+## Connecting to your warehouse
+
+Everything lives in `.env`, which is gitignored:
 
 ```bash
-# in-cluster Postgres, while spinup.sh is holding the port-forward
-PGPASSWORD=dbt psql -h 127.0.0.1 -p 15432 -U dbt -d dbt_local -c 'table analytics.customer_orders'
-
-# local Postgres (./spinup.sh --local)
-PGPASSWORD=dbt psql -h localhost -U dbt -d dbt_local -c 'table analytics.customer_orders'
-
-# duckdb
-.venv/bin/python -c "import duckdb; print(duckdb.connect('warehouse.duckdb').sql('select * from analytics.customer_orders'))"
+cp .env.example .env
 ```
 
-## Working on it
-
-The project directory is mounted into the dbt pod, so editing a model on your
-Mac needs a re-run, never an image rebuild:
-
 ```bash
-kubectl exec -it -n data deploy/dbt-runner -- dbt run
-kubectl exec -it -n data deploy/dbt-runner -- dbt test
-kubectl logs -f -l app=dbt-runner -n data
+# Snowflake, for example
+DBT_TARGET=snowflake
+DBT_SNOWFLAKE_ACCOUNT=ab12345.us-east-1
+DBT_SNOWFLAKE_USER=dbt
+DBT_SNOWFLAKE_PASSWORD=...
+DBT_SNOWFLAKE_ROLE=TRANSFORMER
+DBT_SNOWFLAKE_WAREHOUSE=COMPUTE_WH
+DBT_SNOWFLAKE_DATABASE=ANALYTICS
+DBT_SCHEMA=ANALYTICS
 ```
 
-Locally it's the usual dbt loop:
+`profiles.yml` ships with targets for **duckdb**, **postgres**, **redshift**,
+**snowflake**, **bigquery**, and **databricks**. `DBT_TARGET` picks one. Every
+value has a default, so you only set what differs for you.
+
+**Install the adapter for your warehouse** — the virtualenv starts with DuckDB
+and Postgres:
 
 ```bash
-export DBT_PROFILES_DIR="$PWD"
+.venv/bin/pip install dbt-snowflake   # or dbt-bigquery, dbt-redshift, dbt-databricks
+```
+
+### BigQuery
+
+BigQuery also needs a service-account JSON file. Download it, then point at it:
+
+```bash
+DBT_TARGET=bigquery
+DBT_BIGQUERY_PROJECT=my-gcp-project
+DBT_BIGQUERY_KEYFILE=/absolute/path/to/service-account.json
+```
+
+For the Kubernetes path, mount it as a Secret — see [k8s/README.md](k8s/README.md).
+
+## Everyday dbt commands
+
+```bash
 source .venv/bin/activate
+export DBT_PROFILES_DIR="$PWD"
 
-dbt run --select stg_orders+     # a model and everything downstream
+dbt build                        # seed + run + test, in dependency order
+dbt run --select customer_orders # one model
+dbt run --select stg_orders+     # a model and everything downstream of it
 dbt test --select customer_orders
-dbt build                        # seed + run + test in DAG order
+dbt compile                      # render the SQL without executing it
 dbt docs generate && dbt docs serve
 ```
 
-## Layout
+`--select` is the workhorse: it takes model names, `+` for upstream/downstream,
+`tag:`, `path:`, and more.
 
-| Path                  | What's in it                                       |
-|-----------------------|----------------------------------------------------|
-| `skaffold.yaml`       | Builds the dbt image, deploys the chart, forwards ports |
-| `charts/dbt/`         | The Helm chart (Postgres + dbt runner). Tune `charts/dbt/values.yaml` |
-| `docker/dbt/`         | The dbt runner image and its entrypoint            |
-| `spinup.sh`           | The one entry point: brings everything up, k8s or `--local` |
-| `teardown.sh`         | Remove it all (`--local` for a non-k8s build)      |
-| `dbt_project.yml`     | Project config; staging → views, marts → tables    |
-| `profiles.yml`        | Connection targets, all env-var driven             |
-| `docker-compose.yml`  | Postgres 16, only if you don't have one already    |
-| `seeds/`              | CSVs loaded into the warehouse by `dbt seed`       |
-| `models/staging/`     | One cleaned-up model per raw source                |
-| `models/marts/`       | Business-facing models built from staging          |
+## Running it on Kubernetes
 
-`warehouse.duckdb`, `target/`, `logs/`, and `.venv/` are gitignored — everything
-tracked is source, and any clone rebuilds the warehouse from scratch.
+Optional, and kept out of the way in [`k8s/`](k8s/README.md). It deploys dbt —
+not a database — and connects to the same warehouse from `.env`:
+
+```bash
+k8s/spinup.sh
+k8s/teardown.sh
+```
+
+## Learning dbt
+
+New to dbt? These are the ones worth your time, roughly in order:
+
+- **[dbt Fundamentals](https://learn.getdbt.com/courses/dbt-fundamentals)** —
+  free official course, a few hours, the fastest way in.
+- **[Quickstart guides](https://docs.getdbt.com/guides)** — step-by-step for
+  your specific warehouse.
+- **[Building your first models](https://docs.getdbt.com/docs/build/models)** —
+  what a model is and how materializations work.
+- **[Tests](https://docs.getdbt.com/docs/build/data-tests)** and
+  **[sources](https://docs.getdbt.com/docs/build/sources)** — the two things
+  that make a project trustworthy.
+- **[Jinja & macros](https://docs.getdbt.com/docs/build/jinja-macros)** — where
+  dbt stops being "just SQL files".
+- **[Best practices](https://docs.getdbt.com/best-practices)** — the staging /
+  intermediate / marts structure this project follows, explained.
+- **[dbt-utils](https://github.com/dbt-labs/dbt-utils)** — the package almost
+  every project ends up installing.
+- **[Node selection syntax](https://docs.getdbt.com/reference/node-selection/syntax)**
+  — the full `--select` reference, worth a skim once you have a few models.
+- **[dbt Slack](https://www.getdbt.com/community/join-the-community)** — an
+  unusually helpful community if you get stuck.
+
+## Adding your own models
+
+1. Drop a `.sql` file in `models/staging/` that selects from a source, and one
+   in `models/marts/` that joins them.
+2. Reference other models with `{{ ref('other_model') }}` — that's how dbt knows
+   the build order.
+3. Describe it and add tests in the folder's `.yml` file.
+4. `dbt build`.
+
+When your data lives in the warehouse already (rather than in `seeds/`), declare
+it with [sources](https://docs.getdbt.com/docs/build/sources) and use
+`{{ source('name', 'table') }}` instead of `ref`.

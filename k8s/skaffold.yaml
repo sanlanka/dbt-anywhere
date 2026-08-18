@@ -14,6 +14,10 @@ build:
       context: docker/dbt
       docker:
         dockerfile: Dockerfile
+        buildArgs:
+          # Warehouse adapters baked into the image. Add yours here, e.g.
+          # "dbt-postgres dbt-duckdb dbt-snowflake".
+          DBT_ADAPTERS: "dbt-postgres dbt-duckdb"
 
 # Deploy the custom Helm chart, injecting the freshly built image tag.
 manifests:
@@ -41,8 +45,3 @@ portForward:
     namespace: data
     port: 8080
     localPort: 8080
-  - resourceType: service
-    resourceName: postgres
-    namespace: data
-    port: 5432
-    localPort: 15432
