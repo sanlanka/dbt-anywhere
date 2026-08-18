@@ -63,6 +63,27 @@ kubectl cluster-info >/dev/null 2>&1 || \
 KUBE_CONTEXT="$(kubectl config current-context)"
 info "Tooling and cluster OK. Context: $KUBE_CONTEXT"
 
+# The project is mounted into the pod by hostPath, so the cluster VM has to be
+# able to see this directory. Docker Desktop shares /Users by default and not
+# much else — a repo in /tmp mounts as "not a directory" and the pod hangs in
+# ContainerCreating, which is a slow way to learn this.
+case "$(uname -s)" in
+  Darwin)
+    case "$PROJECT_ROOT" in
+      /Users/*|/Volumes/*) ;;
+      *) warn "This project lives at $PROJECT_ROOT."
+         warn "Docker Desktop shares /Users and /Volumes by default; other paths"
+         warn "fail to mount and the pod hangs in ContainerCreating."
+         warn "Move the repo under your home directory, or add this path in"
+         warn "Docker Desktop > Settings > Resources > File Sharing."
+         if [[ "$ASSUME_YES" != true && -t 0 ]]; then
+           printf '\033[1;33m==>\033[0m Continue anyway? [y/N] '
+           read -r reply
+           [[ "$reply" =~ ^[Yy] ]] || exit 1
+         fi ;;
+    esac ;;
+esac
+
 [[ -f "$ENV_FILE" ]] || error "No .env found. Run: cp .env.example .env — then fill in your warehouse."
 
 set -a; . "$ENV_FILE"; set +a

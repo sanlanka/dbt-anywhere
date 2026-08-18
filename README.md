@@ -44,6 +44,12 @@ Two things `spinup.sh` handles that otherwise bite you on a first run:
   (`host.minikube.internal` on minikube) so the pod reaches your machine. Your
   `.env` is not modified.
 
+**Where the repo lives matters.** The project is mounted into the pod, and
+Docker Desktop only shares `/Users` and `/Volumes` by default — a clone in
+`/tmp` leaves the pod stuck in `ContainerCreating`. Keep it under your home
+directory, or add the path in Docker Desktop → Settings → Resources → File
+Sharing. `spinup.sh` warns before deploying.
+
 ### If your local server refuses the connection
 
 A Postgres bound to loopback only can't be reached from a pod no matter what
