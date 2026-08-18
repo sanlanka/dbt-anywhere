@@ -28,6 +28,16 @@ The script finds or creates a local warehouse, then does `dbt seed` → `dbt run
 **Prerequisites:** Python 3.12 (dbt doesn't support 3.13+ yet), plus either a
 local Postgres or Docker.
 
+## Tearing it down
+
+```bash
+./teardown.sh          # drop the built tables/views + target/, logs/, warehouse.duckdb
+./teardown.sh --all    # ...and the database, the venv, and the Docker volume
+```
+
+The default is safe to run any time — `./run.sh` rebuilds everything from
+source. `--all` asks you to type the database name before dropping it.
+
 ## Swapping the engine
 
 Targets live in `profiles.yml`. Postgres is the default; DuckDB ships as a
@@ -115,6 +125,7 @@ dbt docs generate && dbt docs serve
 | `models/staging/`     | One cleaned-up model per raw source                |
 | `models/marts/`       | Business-facing models built from staging          |
 | `run.sh`              | Bootstrap + full build                             |
+| `teardown.sh`         | Remove what `run.sh` created                       |
 
 `warehouse.duckdb`, `target/`, `logs/`, and `.venv/` are gitignored — everything
 tracked is source, and any clone rebuilds the warehouse from scratch.
