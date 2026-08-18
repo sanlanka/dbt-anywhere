@@ -9,3 +9,4 @@ logs/
 __pycache__/
 .user.yml
 .env
+.github/scripts/__pycache__/

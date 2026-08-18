@@ -3,6 +3,10 @@
 [![Star this repo](https://img.shields.io/github/stars/sanlanka/dbt-anywhere?style=flat&logo=github&label=Star%20this%20repo&color=yellow)](https://github.com/sanlanka/dbt-anywhere)
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/slanka10)
 
+[![Page views](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/sanlanka/dbt-anywhere/traffic-stats/stats/views.json&cacheSeconds=300)](https://github.com/sanlanka/dbt-anywhere/blob/traffic-stats/stats/SUMMARY.md)
+[![Unique visitors](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/sanlanka/dbt-anywhere/traffic-stats/stats/visitors.json&cacheSeconds=300)](https://github.com/sanlanka/dbt-anywhere/blob/traffic-stats/stats/SUMMARY.md)
+[![Clones](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/sanlanka/dbt-anywhere/traffic-stats/stats/clones.json&cacheSeconds=300)](https://github.com/sanlanka/dbt-anywhere/blob/traffic-stats/stats/SUMMARY.md)
+
 A working **dbt** project that runs on **Kubernetes** with one command and
 connects to **the warehouse you already have** — Snowflake, BigQuery, Redshift,
 Databricks, Postgres, or a Postgres on your own laptop.
