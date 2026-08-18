@@ -1,5 +1,5 @@
 # dbt runner image. Python 3.12 because dbt does not support 3.13+ yet — the
-# same constraint that run.sh enforces locally, so both paths run one version.
+# same constraint spinup.sh enforces locally, so both paths run one version.
 FROM python:3.12-slim
 
 RUN set -eux; \

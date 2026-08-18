@@ -52,7 +52,7 @@ Targets live in `profiles.yml`. Postgres is the default; DuckDB ships as a
 zero-infrastructure fallback where the entire warehouse is a single file:
 
 ```bash
-./run.sh --target duckdb     # no server, no Docker, nothing to install
+./spinup.sh --local --duckdb  # no server, no Docker, nothing to install
 dbt run --target duckdb      # or per-command
 export DBT_TARGET=duckdb     # or for the whole shell
 ```
@@ -106,7 +106,7 @@ and customers, and the allowed set of order statuses.
 # in-cluster Postgres, while spinup.sh is holding the port-forward
 PGPASSWORD=dbt psql -h 127.0.0.1 -p 15432 -U dbt -d dbt_local -c 'table analytics.customer_orders'
 
-# local Postgres (run.sh)
+# local Postgres (./spinup.sh --local)
 PGPASSWORD=dbt psql -h localhost -U dbt -d dbt_local -c 'table analytics.customer_orders'
 
 # duckdb
