@@ -33,6 +33,18 @@ cp .env.example .env    # edit: warehouse type, host, credentials
 `seed` → `run` → `test`, generates the docs, and serves them. `Ctrl-C` stops it;
 `./run.sh --clean` removes the virtualenv and build output.
 
+**If the database doesn't exist yet**, `run.sh` offers to create it — but only
+for Postgres and Redshift, servers you own:
+
+```
+==> Database 'analytics' does not exist on localhost:5432. Create it? [y/N]
+```
+
+`--yes` skips the prompt (for scripts and CI). Snowflake, BigQuery, and
+Databricks are never touched: creating databases there is rarely yours to do.
+dbt itself always creates the *schema*, on every warehouse — just never the
+database.
+
 **Prerequisites:** Python 3.12 (dbt doesn't support 3.13+ yet —
 `brew install python@3.12`).
 
@@ -51,6 +63,7 @@ cp .env.example .env    # edit: warehouse type, host, credentials
 | `profiles.yml`    | Connection targets, all env-var driven. No secrets, safe to commit |
 | `.env.example`    | Template for your warehouse credentials. Copy to `.env` (gitignored) |
 | `run.sh`          | Build + test + serve docs. The main entry point |
+| `.dbt-ensure-db.py` | Helper `run.sh` uses to detect (and offer to create) a missing database |
 | `k8s/`            | Optional: run the same project inside Kubernetes. See [k8s/README.md](k8s/README.md) |
 
 Generated at runtime and gitignored: `.venv/` (Python environment), `target/`

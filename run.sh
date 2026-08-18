@@ -6,6 +6,7 @@
 #   ./run.sh --duckdb     # force the sandbox: no warehouse, no server
 #   ./run.sh --no-browser # don't open a browser tab
 #   ./run.sh --clean      # remove the venv and build output, then exit
+#   ./run.sh --yes        # don't prompt before creating a missing database
 #
 # To run the same project on Kubernetes instead: k8s/spinup.sh
 #
@@ -17,16 +18,18 @@ error() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 FORCE_DUCKDB=false
 OPEN_BROWSER=true
+ASSUME_YES=false
 for arg in "$@"; do
   case "$arg" in
     --duckdb)     FORCE_DUCKDB=true ;;
     --no-browser) OPEN_BROWSER=false ;;
+    --yes|-y)     ASSUME_YES=true ;;
     --clean)
       info "Removing .venv/, target/, logs/, warehouse.duckdb..."
       rm -rf .venv target logs warehouse.duckdb warehouse.duckdb.wal
       info "Clean. Your warehouse was not touched."
       exit 0 ;;
-    *) error "Unknown option: $arg (try --duckdb, --no-browser, --clean)" ;;
+    *) error "Unknown option: $arg (try --duckdb, --no-browser, --clean, --yes)" ;;
   esac
 done
 
@@ -57,6 +60,51 @@ fi
 
 export DBT_PROFILES_DIR="$PWD"
 DBT=.venv/bin/dbt
+
+# dbt creates schemas, but never databases. On a server you own (Postgres or
+# Redshift) offer to create a missing one, so a first run is a single command.
+# Cloud warehouses are left alone — creating databases there is rarely yours
+# to do, and usually not permitted.
+ensure_database() {
+  case "$TARGET" in postgres|redshift) ;; *) return 0 ;; esac
+
+  local host port user password dbname status
+  if [[ "$TARGET" == postgres ]]; then
+    host="${DBT_PG_HOST:-localhost}"; port="${DBT_PG_PORT:-5432}"
+    user="${DBT_PG_USER:-dbt}"; password="${DBT_PG_PASSWORD:-}"
+    dbname="${DBT_PG_DATABASE:-analytics}"
+  else
+    host="${DBT_REDSHIFT_HOST:-localhost}"; port="${DBT_REDSHIFT_PORT:-5439}"
+    user="${DBT_REDSHIFT_USER:-dbt}"; password="${DBT_REDSHIFT_PASSWORD:-}"
+    dbname="${DBT_REDSHIFT_DATABASE:-analytics}"
+  fi
+
+  # 0 = database is there, 3 = server reachable but database missing,
+  # anything else = bad host or credentials, which dbt will report properly.
+  # `|| status=$?` matters: a bare non-zero exit would trip `set -e` and kill
+  # the script before we ever get to the prompt.
+  status=0
+  PGHOST="$host" PGPORT="$port" PGUSER="$user" PGPASSWORD="$password" PGDB="$dbname" \
+    .venv/bin/python .dbt-ensure-db.py check || status=$?
+  [[ $status -eq 3 ]] || return 0
+
+  if [[ "$ASSUME_YES" != true ]]; then
+    if [[ ! -t 0 ]]; then
+      error "Database '$dbname' does not exist on $host:$port. Create it, or re-run with --yes."
+    fi
+    printf '\033[1;33m==>\033[0m Database %s does not exist on %s:%s. Create it? [y/N] ' \
+      "'$dbname'" "$host" "$port"
+    read -r reply
+    [[ "$reply" =~ ^[Yy] ]] || error "Not created. Create the database, then re-run."
+  fi
+
+  info "Creating database '$dbname'..."
+  PGHOST="$host" PGPORT="$port" PGUSER="$user" PGPASSWORD="$password" PGDB="$dbname" \
+    .venv/bin/python .dbt-ensure-db.py create \
+    || error "Could not create '$dbname' — you may lack CREATEDB permission."
+}
+
+ensure_database
 
 info "Checking the '$TARGET' connection..."
 "$DBT" debug --connection --target "$TARGET" >/tmp/dbt-debug.log 2>&1 || {
