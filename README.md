@@ -16,14 +16,14 @@ your own machine.
 ## Quick start
 
 ```bash
-cp .env.example .env    # point at your warehouse
+cp .env.example .env    # point it at your warehouse
 ./spinup.sh
 ```
 
-The script installs any missing tooling (kubectl, helm, skaffold), turns your
-`.env` into a Kubernetes Secret, builds the dbt image, deploys it, checks the
-connection, runs `seed` → `run` → `test` against your warehouse, holds the
-port-forward, and opens the UI when it's ready:
+That's it. The script installs any missing tooling (kubectl, helm, skaffold),
+turns your `.env` into a Kubernetes Secret, builds the dbt image, deploys it,
+checks the connection, runs `seed` → `run` → `test` against your warehouse,
+holds the port-forward, and opens the UI when it's ready:
 
 - dbt docs (DAG + catalog) → **http://localhost:8080** — opens automatically
 
@@ -34,39 +34,46 @@ touches your warehouse.
 **Prerequisites:** Docker Desktop with Kubernetes enabled (or minikube), and a
 warehouse you can reach. On macOS the CLI tools install themselves via Homebrew.
 
-Two things `spinup.sh` handles that otherwise bite you on a first run:
+### Already have Postgres on your Mac?
 
-- **A missing database.** dbt creates schemas but never databases, so it prompts
-  before creating one — Postgres and Redshift only, servers you own. `--yes`
-  skips the prompt. Cloud warehouses are left alone.
-- **A warehouse on this Mac.** Inside a pod, `localhost` is the pod. If `.env`
-  points at `localhost`, the Secret gets `host.docker.internal` instead
-  (`host.minikube.internal` on minikube) so the pod reaches your machine. Your
-  `.env` is not modified.
+Then this is the whole `.env` — it works as-is on Docker Desktop, with no
+changes to your Postgres:
 
-**Where the repo lives matters.** The project is mounted into the pod, and
-Docker Desktop only shares `/Users` and `/Volumes` by default — a clone in
-`/tmp` leaves the pod stuck in `ContainerCreating`. Keep it under your home
-directory, or add the path in Docker Desktop → Settings → Resources → File
-Sharing. `spinup.sh` warns before deploying.
-
-### If your local server refuses the connection
-
-A Postgres bound to loopback only can't be reached from a pod no matter what
-hostname it's given. `spinup.sh` detects this and says so before deploying. To
-open it up, in `postgresql.conf`:
-
-```
-listen_addresses = '*'
+```bash
+DBT_TARGET=postgres
+DBT_SCHEMA=analytics
+DBT_PG_HOST=localhost
+DBT_PG_PORT=5432
+DBT_PG_USER=your_username     # whoami, on a Homebrew or Postgres.app install
+DBT_PG_PASSWORD=
+DBT_PG_DATABASE=analytics
 ```
 
-and in `pg_hba.conf`, allow the Docker network:
+`./spinup.sh` handles the two things that would otherwise trip you up:
 
-```
-host  all  all  192.168.65.0/24  scram-sha-256
-```
+- **`localhost` means the pod, not your Mac.** The Secret gets
+  `host.docker.internal` instead (`host.minikube.internal` on minikube), so the
+  pod reaches your machine. Your `.env` is left as you wrote it. This works even
+  when Postgres listens on loopback only — Docker Desktop's proxy connects from
+  the host side, so Postgres sees the client as `127.0.0.1`.
+- **A missing database.** dbt creates schemas but never databases, so it offers
+  to create one — Postgres and Redshift only, servers you own. `--yes` skips the
+  prompt. Cloud warehouses are never touched.
 
-then restart Postgres. (Postgres.app: Server Settings → Show config files.)
+### Two things worth knowing
+
+**Keep the repo under your home directory.** The project is mounted into the
+pod, and Docker Desktop only shares `/Users` and `/Volumes` by default — a clone
+in `/tmp` leaves the pod stuck in `ContainerCreating`. Add other paths under
+Docker Desktop → Settings → Resources → File Sharing. `spinup.sh` warns you
+before deploying.
+
+**On minikube, a loopback-only server is unreachable.** minikube runs in its own
+VM, so unlike Docker Desktop it can't proxy from the host. If your database
+listens only on `127.0.0.1`, set `listen_addresses = '*'` in `postgresql.conf`,
+allow the minikube network in `pg_hba.conf` (e.g.
+`host all all 192.168.49.0/24 scram-sha-256`), and restart Postgres.
+`spinup.sh` checks for this and tells you.
 
 ## What's in here
 

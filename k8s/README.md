@@ -37,8 +37,10 @@ repo root ──hostPath mount──►  Pod/dbt-runner ──► your warehouse
 - **A warehouse on your Mac** is reached as `host.docker.internal`
   (`host.minikube.internal` on minikube): inside a pod, `localhost` is the pod.
   `spinup.sh` rewrites the host when it builds the Secret, leaving your `.env`
-  alone. The server must listen on more than loopback for this to work —
-  `spinup.sh` warns you when it doesn't.
+  alone. On Docker Desktop this works even for a server bound to loopback only,
+  because its proxy connects from the host side — Postgres sees the client as
+  `127.0.0.1`. minikube runs in its own VM and can't do that, so there the
+  server has to listen on more than loopback.
 
 - **Credentials** go in as a Secret built from `.env`, pulled into the container
   with `envFrom`. They never enter the chart, `helm get values`, or git. Re-run

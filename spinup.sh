@@ -104,36 +104,41 @@ is_loopback() {
   [[ "$1" == "localhost" || "$1" == "127.0.0.1" || "$1" == "::1" ]]
 }
 
-# Warn early if the server is bound to loopback only: the pod will not be able
-# to reach it however we spell the hostname.
+# A server bound to loopback only is still reachable on Docker Desktop: its
+# proxy relays host.docker.internal from the host side, so Postgres sees the
+# client as 127.0.0.1 and loopback pg_hba rules apply. minikube is a real VM
+# with its own network, so there the connection arrives from an external
+# address and loopback-only binding does block it.
 check_reachable_from_container() {
   local port="$1"
+  [[ "$KUBE_CONTEXT" == *minikube* ]] || return 0
   command -v lsof >/dev/null 2>&1 || return 0
+
   local addrs
   addrs="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $9}')"
   [[ -n "$addrs" ]] || return 0
-  if ! grep -qvE '^(127\.0\.0\.1|\[::1\]):' <<<"$addrs"; then
-    warn "The server on port $port is listening on loopback only:"
-    sed 's/^/      /' <<<"$addrs" >&2
-    cat >&2 <<MSG
+  grep -qvE '^(127\.0\.0\.1|\[::1\]):' <<<"$addrs" && return 0
 
-    A pod cannot reach that, whatever hostname it uses. To open it up, in
-    postgresql.conf set:
+  warn "The server on port $port is listening on loopback only:"
+  sed 's/^/      /' <<<"$addrs" >&2
+  cat >&2 <<MSG
+
+    minikube runs in its own VM, so it cannot reach a loopback-only server.
+    In postgresql.conf set:
 
         listen_addresses = '*'
 
-    and add a line to pg_hba.conf allowing the Docker network, e.g.
+    and allow the minikube network in pg_hba.conf, e.g.
 
-        host  all  all  192.168.65.0/24  scram-sha-256
+        host  all  all  192.168.49.0/24  scram-sha-256
 
     then restart Postgres. (Postgres.app: Server Settings > Show config files.)
 
 MSG
-    if [[ "$ASSUME_YES" != true && -t 0 ]]; then
-      printf '\033[1;33m==>\033[0m Continue anyway? [y/N] '
-      read -r reply
-      [[ "$reply" =~ ^[Yy] ]] || exit 1
-    fi
+  if [[ "$ASSUME_YES" != true && -t 0 ]]; then
+    printf '\033[1;33m==>\033[0m Continue anyway? [y/N] '
+    read -r reply
+    [[ "$reply" =~ ^[Yy] ]] || exit 1
   fi
 }
 
