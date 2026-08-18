@@ -4,7 +4,7 @@
 # Swap engines with --target:  dbt run --target duckdb
 # Or set DBT_TARGET=duckdb once and every command follows.
 
-local_dbt:
+dbt_anywhere:
   target: "{{ env_var('DBT_TARGET', 'postgres') }}"
   outputs:
 

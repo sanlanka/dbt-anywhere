@@ -1,6 +1,6 @@
-name: local_dbt
+name: dbt_anywhere
 version: "1.0.0"
-profile: local_dbt
+profile: dbt_anywhere
 
 model-paths: ["models"]
 seed-paths: ["seeds"]
@@ -11,7 +11,7 @@ target-path: "target"
 clean-targets: ["target", "dbt_packages"]
 
 models:
-  local_dbt:
+  dbt_anywhere:
     staging:
       +materialized: view
     marts:

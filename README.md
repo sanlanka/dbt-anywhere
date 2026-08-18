@@ -1,7 +1,9 @@
-# dbt, running locally
+# dbt anywhere
 
-A complete **dbt** project that runs on your laptop against **Postgres** — with
-the engine as a one-flag swap, because nothing in the models is engine-specific.
+One dbt project that runs on **Postgres**, **DuckDB**, or any warehouse you
+point it at. Nothing in the models is engine-specific, so the engine is a
+one-flag swap — and the default setup needs no cloud account, no credentials,
+and no signup.
 
 ## Quick start
 
