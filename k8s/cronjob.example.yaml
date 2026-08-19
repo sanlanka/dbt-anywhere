@@ -1,0 +1,73 @@
+# A scheduled dbt run: `dbt build` every six hours.
+#
+#   kubectl apply -f k8s/cronjob.example.yaml -n data
+#
+# This is a plain manifest, not part of the Helm chart, because a schedule is a
+# decision about your data — not something a spinup script should guess. Copy
+# it, set `image` and the schedule, and apply it.
+#
+# Trigger one immediately without waiting for the schedule:
+#   kubectl create job --from=cronjob/dbt-scheduled dbt-manual-1 -n data
+#
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dbt-scheduled
+spec:
+  # Every 6 hours: 00:00, 06:00, 12:00, 18:00 UTC. CronJob schedules are UTC
+  # unless you set spec.timeZone (Kubernetes 1.27+).
+  schedule: "0 */6 * * *"
+  # timeZone: "America/New_York"
+
+  # The important one. dbt is not safe to run concurrently with itself: two runs
+  # rebuilding the same table race, and an incremental model can double-count.
+  # Forbid skips the new run if the previous one is still going.
+  concurrencyPolicy: Forbid
+
+  # If the controller was down at the scheduled minute, only start late if it is
+  # less than 5 minutes late. Otherwise skip and wait for the next slot.
+  startingDeadlineSeconds: 300
+
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  jobTemplate:
+    spec:
+      # Do not retry a failed dbt run automatically. A failure is usually bad
+      # data or a broken model; retrying just fails again and hides the signal.
+      backoffLimit: 0
+      # Kill a run that hangs, so it cannot block the next scheduled one.
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: dbt
+              # Same image the Deployment uses. `kubectl get deploy dbt-runner
+              # -n data -o jsonpath='{.spec.template.spec.containers[0].image}'`
+              image: dbt-runner:latest
+              # Overrides the image ENTRYPOINT, which ends in `dbt docs serve`
+              # and never exits — a Job using it would run forever.
+              command: ["dbt"]
+              args: ["build", "--target", "postgres"]
+              envFrom:
+                - secretRef:
+                    name: dbt-warehouse
+              env:
+                - name: DBT_PROFILES_DIR
+                  value: /dbt
+                - name: DBT_TARGET_PATH
+                  value: /tmp/target
+                - name: DBT_LOG_PATH
+                  value: /tmp/logs
+              workingDir: /dbt
+              volumeMounts:
+                - name: project
+                  mountPath: /dbt
+          volumes:
+            # Local only. On a real cluster there is no host repo to mount —
+            # bake the project into the image instead (see README).
+            - name: project
+              hostPath:
+                path: /Users/slanka/workspace/dbt-anywhere
+                type: Directory

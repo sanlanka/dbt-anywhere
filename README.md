@@ -104,6 +104,7 @@ including making a test fail on purpose.
 | `.env.example`    | Template for your credentials → copy to `.env` |
 | `spinup.sh` / `teardown.sh` | Deploy and remove |
 | `k8s/`            | Chart, image, Skaffold config — [k8s/README.md](k8s/README.md) |
+| `k8s/cronjob.example.yaml` | A scheduled `dbt build`, for running it on a clock |
 
 ## Everyday commands
 
@@ -124,6 +125,107 @@ kubectl exec -it -n data deploy/dbt-runner -- bash
 kubectl exec -n data deploy/dbt-runner -- dbt build
 kubectl logs -f -l app=dbt-runner -n data
 ```
+
+## Running it on a schedule
+
+`spinup.sh` gives you a sandbox: a long-lived pod that builds once and serves
+docs. A job that has to run four times a day is a different shape — a
+**CronJob**, not a Deployment. [k8s/cronjob.example.yaml](k8s/cronjob.example.yaml)
+is a working one; set `image` and the schedule, then:
+
+```bash
+kubectl apply -f k8s/cronjob.example.yaml -n data
+kubectl create job --from=cronjob/dbt-scheduled dbt-manual-1 -n data   # run it now
+kubectl logs job/dbt-manual-1 -n data
+```
+
+### If you think in Terraform
+
+The commands map more closely than you'd expect:
+
+| Terraform | dbt | |
+|---|---|---|
+| `terraform init` | `dbt deps` | Install packages listed in `packages.yml` |
+| `terraform validate` | `dbt parse` | Does the project make sense? No warehouse needed |
+| `terraform refresh` | `dbt source freshness` | Look at upstream state before deciding to run |
+| `terraform plan` | `dbt compile` | Render the SQL that *would* run |
+| `terraform apply` | `dbt run` | Actually change the warehouse |
+| — | `dbt test` | Assert the result is correct. No Terraform equivalent |
+| `terraform apply` + checks | `dbt build` | run + test interleaved, in dependency order |
+| `terraform.tfstate` | `target/manifest.json` | What the last run knew about the project |
+
+**Where the analogy breaks, and it matters:** `dbt compile` is *not* a plan. It
+renders `{{ ref() }}` into real table names and stops. It will not tell you "this
+will change 4,000 rows" — dbt is declarative about the *shape* of your
+warehouse, never about its contents. Every `dbt run` is effectively
+`terraform apply -auto-approve`.
+
+The safety net is the other direction. Terraform asks before changing;
+dbt changes and then checks. That's what `dbt build` is for: it runs each model
+and immediately runs that model's tests, and **skips everything downstream of a
+failed test**. A bad `stg_orders` stops there instead of quietly poisoning
+`customer_orders`. For scheduled runs, use `dbt build`, not `dbt run`.
+
+Two more mappings worth internalising:
+
+- **Idempotency depends on materialization.** A `table` model is dropped and
+  recreated each run, so it converges on the desired state like Terraform does —
+  re-running is free and safe. An `incremental` model is *stateful*: it appends
+  or merges rows since the last run, so running it twice is not the same as
+  running it once. `dbt run --full-refresh` is the "rebuild from scratch" escape
+  hatch, and it's the one you'll reach for when an incremental model drifts.
+- **There is no state lock.** Terraform locks state so two applies can't collide.
+  dbt has nothing of the kind — two concurrent runs will happily fight over the
+  same table. `concurrencyPolicy: Forbid` in the CronJob *is* your lock. Don't
+  drop it.
+
+### What one scheduled run does
+
+Every six hours, Kubernetes starts a fresh pod that:
+
+1. Reads warehouse credentials from the `dbt-warehouse` Secret (`envFrom`)
+2. Runs `dbt build` — seeds, then models in dependency order, testing as it goes
+3. Exits 0 on success, non-zero on any failure, and the pod goes away
+
+Nothing persists between runs except what landed in your warehouse. That's the
+point: the run is stateless, the warehouse holds the state.
+
+The example sets `backoffLimit: 0` deliberately — **a failed dbt run should not
+be retried automatically**. Unlike a flaky network call, a dbt failure is
+usually bad upstream data or a broken model, and a retry just fails again two
+minutes later while burning warehouse credits and hiding the signal.
+`activeDeadlineSeconds` kills a hung run so it can't block the next slot.
+
+### The one thing that changes on a real cluster
+
+Locally the project is `hostPath`-mounted from your Mac, which is why editing a
+model and re-running works with no rebuild. **A remote cluster has no such
+directory.** For anything beyond your laptop, bake the project into the image
+and drop the volume:
+
+```dockerfile
+# k8s/docker/dbt/Dockerfile
+COPY . /dbt
+```
+
+That's the better production posture anyway: the image becomes an immutable
+artifact tied to a git SHA, so "which version of the models produced this table"
+has an answer. Build it in CI, push it to a registry, point `image:` at the tag.
+
+### When a CronJob stops being enough
+
+A CronJob runs dbt on a clock and knows nothing else. Reach for
+[Airflow](https://airflow.apache.org/), [Dagster](https://dagster.io/), or
+[dbt Cloud](https://www.getdbt.com/product/dbt-cloud) when you need any of:
+
+- **Dependencies on other work** — run dbt *after* the ingestion job lands, not
+  at 06:00 and hope
+- **Per-model retries and backfills** — rerun just the failed subtree, or
+  reprocess a date range
+- **Alerting and lineage** across more than dbt
+
+`dbt build` is the same command underneath. The orchestrator decides *when* and
+*what to do about failure*; nothing about the project changes.
 
 ## Adding your own models
 
