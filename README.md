@@ -31,8 +31,19 @@ into a Kubernetes Secret, builds the image, deploys it, runs `seed` → `run` �
 `test` against your warehouse, and opens the docs UI at
 **http://localhost:8080**.
 
-`Ctrl-C` stops the port-forward; the pod keeps running. `./teardown.sh` removes
+Then it drops you into a shell inside the dbt pod, so you can just type:
+
+```
+dbt:/dbt# dbt build                          seed + run + test
+dbt:/dbt# dbt run --select customer_orders   build one model
+dbt:/dbt# dbt test                           run the data tests
+```
+
+`exit` leaves the shell; the pod keeps running. `./teardown.sh` removes
 everything. Neither script ever touches your warehouse.
+
+Flags: `--no-shell` skips the shell and holds the port-forward instead (for CI),
+`--no-browser` skips opening the tab, `--yes` skips the create-database prompt.
 
 **Prerequisites:** Docker Desktop with Kubernetes enabled (or minikube). Keep
 the repo under your home directory — Docker Desktop only shares `/Users` by
@@ -96,12 +107,21 @@ including making a test fail on purpose.
 
 ## Everyday commands
 
-The project is mounted into the pod, so an edit needs a re-run, not a rebuild:
+The project is mounted into the pod, so an edit on your Mac needs a re-run, not
+a rebuild. From the shell `spinup.sh` leaves you in:
 
 ```bash
-kubectl exec -it -n data deploy/dbt-runner -- dbt build          # seed+run+test
-kubectl exec -it -n data deploy/dbt-runner -- dbt run --select customer_orders
-kubectl exec -it -n data deploy/dbt-runner -- dbt run --select stg_orders+
+dbt build                        # seed + run + test
+dbt run --select customer_orders # one model
+dbt run --select stg_orders+     # that model and everything downstream
+dbt docs generate                # refresh the docs UI
+```
+
+Closed the shell? Get back in — or run a single command without one:
+
+```bash
+kubectl exec -it -n data deploy/dbt-runner -- bash
+kubectl exec -n data deploy/dbt-runner -- dbt build
 kubectl logs -f -l app=dbt-runner -n data
 ```
 

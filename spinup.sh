@@ -6,13 +6,16 @@
 #   cp .env.example .env   # point at your warehouse once
 #   ./spinup.sh
 #   ./spinup.sh --no-browser   # don't open a browser tab
+#   ./spinup.sh --no-shell     # don't drop into a shell in the pod when done
 #   ./spinup.sh --yes          # don't prompt before creating a missing database
 #
 # dbt runs in the cluster; the warehouse stays wherever it already is. If that
 # is a server on this Mac, the script rewrites localhost to a hostname the pod
 # can actually reach.
 #
-# Stop with Ctrl-C (the pod keeps running). Remove it with ./teardown.sh
+# When it finishes you land in a shell inside the dbt pod, ready to run dbt
+# commands. Type 'exit' to leave; the pod keeps running. Remove it with
+# ./teardown.sh
 #
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -23,12 +26,14 @@ warn()  { printf '\033[1;33m==>\033[0m %s\n' "$*"; }
 error() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 OPEN_BROWSER=true
+OPEN_SHELL=true
 ASSUME_YES=false
 for arg in "$@"; do
   case "$arg" in
     --no-browser) OPEN_BROWSER=false ;;
+    --no-shell)   OPEN_SHELL=false ;;
     --yes|-y)     ASSUME_YES=true ;;
-    *) error "Unknown option: $arg (try --no-browser, --yes)" ;;
+    *) error "Unknown option: $arg (try --no-browser, --no-shell, --yes)" ;;
   esac
 done
 
@@ -36,6 +41,21 @@ DOCS_URL="http://localhost:8080"
 NAMESPACE=data
 SECRET_NAME=dbt-warehouse
 ENV_FILE="$PROJECT_ROOT/.env"
+
+# One EXIT trap for everything that needs tearing down: the rewritten .env (it
+# holds credentials) and the background port-forward.
+SECRET_ENV=""
+PF_PID=""
+cleanup() {
+  [[ -n "$SECRET_ENV" && "$SECRET_ENV" != "$ENV_FILE" ]] && rm -f "$SECRET_ENV"
+  if [[ -n "$PF_PID" ]]; then
+    # Kill the kubectl child first, or it outlives the loop and holds the port.
+    pkill -P "$PF_PID" >/dev/null 2>&1 || true
+    kill "$PF_PID"    >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+trap cleanup EXIT
 
 # --- Prerequisites ----------------------------------------------------------
 ensure_brew() {
@@ -216,7 +236,6 @@ if [[ -n "$REWRITTEN_HOST" ]]; then
   # Same .env, with the host swapped for one the pod can resolve. Written with
   # a restrictive umask and removed on exit — it holds your credentials.
   SECRET_ENV="$(umask 077; mktemp "${TMPDIR:-/tmp}/dbt-env.XXXXXX")"
-  trap 'rm -f "$SECRET_ENV"' EXIT
   # Delimiter is #, not |, because the pattern itself uses | for alternation.
   sed -E "s#^(DBT_(PG|REDSHIFT)_HOST)=.*#\1=$REWRITTEN_HOST#" "$ENV_FILE" > "$SECRET_ENV"
 fi
@@ -228,26 +247,103 @@ kubectl create secret generic "$SECRET_NAME" --namespace "$NAMESPACE" \
 cat <<EOF
 
 Building the dbt image and deploying via Skaffold...
-The pod checks the warehouse connection, runs seed -> run -> test, then serves
-the docs. Once ready (the browser opens on its own):
-  dbt docs : $DOCS_URL
-Press Ctrl-C to stop the port-forward.
+The pod checks the warehouse connection, then runs seed -> run -> test.
 
 EOF
-
-# Poll the docs site and open it once it answers, rather than guessing a delay.
-if [[ "$OPEN_BROWSER" == true ]] && command -v open >/dev/null 2>&1; then
-  ( for _ in $(seq 1 180); do
-      curl -sf -o /dev/null "$DOCS_URL" && { open "$DOCS_URL"; break; }
-      sleep 2
-    done ) >/dev/null 2>&1 &
-fi
 
 # The project is mounted into the pod (see charts/dbt/values.yaml), so editing
 # a model needs a re-run, never an image rebuild.
 export PROJECT_DIR="$PROJECT_ROOT"
 
-# `skaffold dev` builds, deploys, and holds the portForward entries defined in
-# k8s/skaffold.yaml. --cleanup=false keeps the pod running after Ctrl-C.
+# `skaffold run` deploys and returns, unlike `dev`, which holds the terminal.
+# We want the terminal free for your shell inside the pod.
 cd "$PROJECT_ROOT/k8s"
-exec skaffold dev --port-forward=user --cleanup=false --tail=false
+skaffold run
+cd "$PROJECT_ROOT"
+
+info "Waiting for the dbt pod..."
+# The readiness probe only passes once the entrypoint has finished seed -> run
+# -> test and started serving docs, so this waits for the whole run.
+kubectl rollout status deploy/dbt-runner -n "$NAMESPACE" --timeout=300s
+
+# Pin the new pod by name. During a redeploy the old pod lingers in Terminating
+# and still matches deploy/dbt-runner, so logs and exec can land on the pod
+# that is on its way out.
+POD="$(kubectl get pods -n "$NAMESPACE" -l app=dbt-runner \
+        --sort-by=.metadata.creationTimestamp \
+        -o jsonpath='{.items[-1:].metadata.name}')"
+[[ -n "$POD" ]] || error "No dbt-runner pod found in namespace '$NAMESPACE'."
+
+# `skaffold run` does no forwarding, so hold one here. The loop matters: a
+# port-forward dies with its pod, and the pod restarts on any failed run.
+( while true; do
+    kubectl port-forward -n "$NAMESPACE" svc/dbt-docs 8080:8080 >/dev/null 2>&1 || true
+    sleep 2
+  done ) &
+PF_PID=$!
+
+# The docs only serve once seed -> run -> test has finished, so this doubles as
+# a wait for the project run to complete.
+DOCS_UP=false
+for _ in $(seq 1 60); do
+  if curl -sf -o /dev/null "$DOCS_URL"; then DOCS_UP=true; break; fi
+  sleep 1
+done
+
+if [[ "$DOCS_UP" == true ]]; then
+  [[ "$OPEN_BROWSER" == true ]] && command -v open >/dev/null 2>&1 && \
+    { open "$DOCS_URL" >/dev/null 2>&1 || true; }
+else
+  warn "The docs UI hasn't answered yet. The run may still be going, or it failed:"
+  warn "  kubectl logs -n $NAMESPACE deploy/dbt-runner"
+fi
+
+echo
+info "What the pod just did:"
+# Just the milestones — the rest of the log is the docs server's access log.
+kubectl logs -n "$NAMESPACE" "$POD" 2>/dev/null \
+  | grep -aE 'Connection test|Finished running|Completed successfully|Done\.|ERROR|FAIL' \
+  | tail -8 | sed 's/^/    /' || true
+
+# --- Hand over --------------------------------------------------------------
+cat <<EOF
+
+  dbt is running.   docs UI: $DOCS_URL
+
+  You are now in a shell inside the dbt pod, in /dbt. Try:
+
+    dbt build                          seed + run + test, the whole project
+    dbt run                            build the models only
+    dbt run --select customer_orders   build one model
+    dbt run --select stg_orders+       that model and everything downstream
+    dbt test                           run the data tests
+    dbt seed                           reload seeds/*.csv from disk
+    dbt docs generate                  refresh the docs UI
+    dbt ls                             list every model, seed and test
+
+  Your repo is mounted here, so edit models on your Mac and just re-run —
+  no rebuild. Type 'exit' to leave; the pod keeps running.
+
+EOF
+
+if [[ "$OPEN_SHELL" == true && -t 0 && -t 1 ]]; then
+  # PS1 through env, because --norc skips the file that would normally set it.
+  kubectl exec -it -n "$NAMESPACE" "$POD" -- \
+    env PS1='\[\033[1;32m\]dbt\[\033[0m\]:\w\$ ' bash --norc || true
+
+  cat <<EOF
+
+  Left the pod; it is still running, but the docs port-forward stopped with
+  this shell. To get back in:
+
+    kubectl exec -it -n $NAMESPACE deploy/dbt-runner -- bash    a shell again
+    kubectl port-forward -n $NAMESPACE svc/dbt-docs 8080:8080   docs UI again
+    ./teardown.sh                                               remove everything
+
+EOF
+else
+  # No terminal (or --no-shell): hold the port-forward instead, as before.
+  echo "  Holding the port-forward. Ctrl-C to stop; the pod keeps running."
+  echo
+  wait "$PF_PID" 2>/dev/null || true
+fi
