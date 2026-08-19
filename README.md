@@ -139,45 +139,40 @@ kubectl create job --from=cronjob/dbt-scheduled dbt-manual-1 -n data   # run it 
 kubectl logs job/dbt-manual-1 -n data
 ```
 
-### If you think in Terraform
+### The commands, and which one to schedule
 
-The commands map more closely than you'd expect:
+| | |
+|---|---|
+| `dbt deps` | Install packages from `packages.yml` |
+| `dbt parse` | Does the project make sense? No warehouse needed |
+| `dbt source freshness` | Is the upstream data new enough to bother running? |
+| `dbt compile` | Render the SQL that *would* run, without running it |
+| `dbt run` | Build the models |
+| `dbt test` | Assert the results are correct |
+| `dbt build` | **run + test interleaved, in dependency order — schedule this one** |
 
-| Terraform | dbt | |
-|---|---|---|
-| `terraform init` | `dbt deps` | Install packages listed in `packages.yml` |
-| `terraform validate` | `dbt parse` | Does the project make sense? No warehouse needed |
-| `terraform refresh` | `dbt source freshness` | Look at upstream state before deciding to run |
-| `terraform plan` | `dbt compile` | Render the SQL that *would* run |
-| `terraform apply` | `dbt run` | Actually change the warehouse |
-| — | `dbt test` | Assert the result is correct. No Terraform equivalent |
-| `terraform apply` + checks | `dbt build` | run + test interleaved, in dependency order |
-| `terraform.tfstate` | `target/manifest.json` | What the last run knew about the project |
+`dbt build` is the one to put on a schedule, and the reason is worth knowing: it
+runs each model and then immediately runs *that model's* tests, and **skips
+everything downstream of a failed test**. A bad `stg_orders` stops right there
+instead of quietly poisoning `customer_orders`. Run them separately with
+`dbt run && dbt test` and the whole warehouse is already rebuilt from bad data
+by the time the first test fails.
 
-**Where the analogy breaks, and it matters:** `dbt compile` is *not* a plan. It
-renders `{{ ref() }}` into real table names and stops. It will not tell you "this
-will change 4,000 rows" — dbt is declarative about the *shape* of your
-warehouse, never about its contents. Every `dbt run` is effectively
-`terraform apply -auto-approve`.
+`dbt compile` is not a dry run. It renders `{{ ref() }}` into real table names
+and stops — it will not tell you "this changes 4,000 rows." dbt has no preview
+of what a run does to your data. Every run just runs.
 
-The safety net is the other direction. Terraform asks before changing;
-dbt changes and then checks. That's what `dbt build` is for: it runs each model
-and immediately runs that model's tests, and **skips everything downstream of a
-failed test**. A bad `stg_orders` stops there instead of quietly poisoning
-`customer_orders`. For scheduled runs, use `dbt build`, not `dbt run`.
-
-Two more mappings worth internalising:
+Two behaviours that decide how a scheduled job should be configured:
 
 - **Idempotency depends on materialization.** A `table` model is dropped and
-  recreated each run, so it converges on the desired state like Terraform does —
-  re-running is free and safe. An `incremental` model is *stateful*: it appends
-  or merges rows since the last run, so running it twice is not the same as
-  running it once. `dbt run --full-refresh` is the "rebuild from scratch" escape
-  hatch, and it's the one you'll reach for when an incremental model drifts.
-- **There is no state lock.** Terraform locks state so two applies can't collide.
-  dbt has nothing of the kind — two concurrent runs will happily fight over the
-  same table. `concurrencyPolicy: Forbid` in the CronJob *is* your lock. Don't
-  drop it.
+  recreated each run, so re-running is free and safe. An `incremental` model is
+  *stateful* — it appends or merges rows since the last run, so running it twice
+  is not the same as running it once. `dbt run --full-refresh` is the rebuild
+  from scratch, and it's what you reach for when an incremental model drifts.
+- **Nothing stops two runs from colliding.** dbt has no locking. Two concurrent
+  runs will fight over the same table, and overlapping incremental runs can
+  double-count. `concurrencyPolicy: Forbid` in the CronJob is the only thing
+  preventing it. Don't drop it.
 
 ### What one scheduled run does
 
@@ -195,6 +190,10 @@ be retried automatically**. Unlike a flaky network call, a dbt failure is
 usually bad upstream data or a broken model, and a retry just fails again two
 minutes later while burning warehouse credits and hiding the signal.
 `activeDeadlineSeconds` kills a hung run so it can't block the next slot.
+
+One detail that will catch you: the CronJob overrides the image's entrypoint
+with `command: ["dbt"]`. The default entrypoint ends in `dbt docs serve`, which
+never exits — a Job using it would run forever instead of finishing.
 
 ### The one thing that changes on a real cluster
 
