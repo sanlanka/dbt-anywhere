@@ -1,14 +1,14 @@
 # Traffic — sanlanka/dbt-anywhere
 
-_Last updated: 2026-10-07 10:12 UTC. Accumulated daily from the GitHub Traffic API (which keeps
+_Last updated: 2026-10-08 10:31 UTC. Accumulated daily from the GitHub Traffic API (which keeps
 only 14 days). "Unique" is the sum of per-day uniques, so it slightly
 over-counts visitors who return on different days._
 
 | Metric | All-time | Days |
 |---|--:|--:|
-| 📈 Page views | 47 | 63 |
-| 🧍 Unique visitors (Σ daily) | 3 | 63 |
-| ⬇️ Clones | 359 | 63 |
-| 🧍 Unique cloners (Σ daily) | 256 | 63 |
+| 📈 Page views | 47 | 64 |
+| 🧍 Unique visitors (Σ daily) | 3 | 64 |
+| ⬇️ Clones | 378 | 64 |
+| 🧍 Unique cloners (Σ daily) | 269 | 64 |
 
 History: [`views.csv`](views.csv) · [`clones.csv`](clones.csv)
